@@ -112,9 +112,20 @@
   </script>
 </head>
 <body class="font-sans text-fg">
-  <div id="root"></div>
+  <div id="root">
+    <div id="boot-msg" style="min-height:60vh;display:grid;place-items:center;font-family:Rubik,system-ui,sans-serif;color:#64748b">
+      <div style="text-align:center">
+        <div style="width:28px;height:28px;margin:0 auto 12px;border:3px solid #c1dbf1;border-top-color:#005dac;border-radius:50%;animation:spin .8s linear infinite"></div>
+        Loading dashboard…
+      </div>
+    </div>
+  </div>
+  <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
 
-  <script type="text/babel" data-presets="react">
+  <!-- App source. Custom script type so Babel's auto-run ignores it; it is
+       compiled explicitly by the boot script below (classic JSX runtime) so it
+       never depends on Babel's flaky DOMContentLoaded auto-run. -->
+  <script type="text/jsx-app" id="app-code">
     const { useState } = React;
 
     /* ----------------------------------------------------------------
@@ -198,7 +209,7 @@
           <div className="mx-auto max-w-[1280px] px-08 h-[60px] flex items-center gap-07">
             {/* co-brand lockup */}
             <div className="flex items-center gap-03 pr-05 mr-01 border-r border-white/20">
-              <div className="h-[44px] w-[44px] rounded-lg bg-white/15 grid place-items-center font-title font-bold text-[17.6px] leading-none">L&amp;T</div>
+              <div className="h-[44px] w-[44px] shrink-0 rounded-lg bg-white/15 grid place-items-center font-title font-bold text-[17.6px] leading-none">L&amp;T</div>
               <div className="leading-tight">
                 <div className="text-h5 text-white/70">Powered by</div>
                 <div className="font-title font-semibold text-h4 -mt-[2px]">Bajaj Allianz</div>
@@ -591,6 +602,40 @@
     }
 
     ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+
+  <!-- Deterministic boot: explicitly compile + run the app once everything is
+       loaded, instead of relying on Babel's auto-run (which races CDN load
+       timing and can silently leave the page blank). Surfaces errors visibly. -->
+  <script>
+    (function () {
+      function fail(html) {
+        var r = document.getElementById("root");
+        if (r) r.innerHTML =
+          '<div style="padding:40px;max-width:680px;margin:0 auto;font-family:Rubik,system-ui,sans-serif;color:#b91c1c">' +
+          '<h2 style="margin:0 0 8px;font-size:18px">Dashboard failed to load</h2>' + html + "</div>";
+      }
+      function boot() {
+        var root = document.getElementById("root");
+        if (root && root.querySelector("header")) return; // already mounted (e.g. by auto-run)
+        if (!window.React || !window.ReactDOM || !window.Babel) {
+          return fail("<p>Couldn't load React/Babel from the CDN. Check your internet connection and reload the page.</p>");
+        }
+        try {
+          var src = document.getElementById("app-code").textContent;
+          var out = window.Babel.transform(src, { presets: [["react", { runtime: "classic" }]] }).code;
+          (0, eval)(out);
+        } catch (e) {
+          fail("<pre style=\"white-space:pre-wrap;font-size:13px\">" + (e && e.message ? e.message : e) + "</pre>");
+          console.error(e);
+        }
+      }
+      if (document.readyState === "loading") {
+        window.addEventListener("DOMContentLoaded", boot);
+      } else {
+        setTimeout(boot, 0);
+      }
+    })();
   </script>
 </body>
 </html>
