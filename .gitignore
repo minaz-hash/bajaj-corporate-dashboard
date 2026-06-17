@@ -1,0 +1,8 @@
+# OS / editor cruft
+Thumbs.db
+.DS_Store
+*.log
+
+# Dependencies (if later ported to a Vite build)
+node_modules/
+dist/
