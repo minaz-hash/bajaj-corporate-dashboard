@@ -189,6 +189,14 @@
       "What new plans are available for us?",
     ];
 
+    const NOTIFICATIONS = [
+      { id:1, icon:"calendar", accent:"rose",    title:"12 policies expiring soon",      body:"Group health and marine policies expire within 30 days. Review before lapse.", time:"2h ago", unread:true },
+      { id:2, icon:"refresh",  accent:"amber",   title:"Renewal quote ready",            body:"Your Property renewal quote for FY25-26 is available for approval.",          time:"5h ago", unread:true },
+      { id:3, icon:"doc",      accent:"blue",    title:"Claim #CLM-4471 updated",        body:"Surveyor report uploaded. Settlement moved to processing stage.",             time:"Yesterday", unread:true },
+      { id:4, icon:"shield",   accent:"emerald", title:"Endorsement approved",           body:"Liability policy endorsement for new warehouse location is now active.",     time:"2 days ago", unread:false },
+      { id:5, icon:"heart",    accent:"indigo",  title:"Wellness report published",      body:"Q2 employee wellness summary is ready. Average score improved to 4.2/5.",     time:"4 days ago", unread:false },
+    ];
+
     const ACCENT = {
       blue:{bg:"var(--color-accent-blue-subtlest)",fg:"var(--color-accent-blue-text)",bd:"var(--color-accent-blue-border)"},
       amber:{bg:"var(--color-accent-amber-subtlest)",fg:"var(--color-accent-amber-text)",bd:"var(--color-accent-amber-border)"},
@@ -204,6 +212,7 @@
 
     function TopNav(){
       const [active,setActive]=useState("Home");
+      const [notifOpen,setNotifOpen]=useState(false);
       return (
         <header className="sticky top-0 z-30 bg-brand text-fg-inverse shadow-sm">
           <div className="mx-auto max-w-[1280px] px-08 h-[60px] flex items-center gap-07">
@@ -227,7 +236,8 @@
             </nav>
 
             <div className="ml-auto flex items-center gap-04">
-              <button aria-label="Notifications" className="relative h-09 w-09 grid place-items-center rounded-full hover:bg-white/10 focus:outline-none focus-visible:ring-2 ring-white/60">
+              <button aria-label="Notifications" onClick={()=>setNotifOpen(true)} aria-haspopup="dialog" aria-expanded={notifOpen}
+                className="relative h-09 w-09 grid place-items-center rounded-full hover:bg-white/10 focus:outline-none focus-visible:ring-2 ring-white/60">
                 <I.bell size={20}/>
                 <span className="absolute top-[8px] right-[8px] h-[8px] w-[8px] rounded-full bg-[#f59e0b] ring-2 ring-brand"></span>
               </button>
@@ -241,7 +251,68 @@
               </div>
             </div>
           </div>
+          <NotificationPanel open={notifOpen} onClose={()=>setNotifOpen(false)}/>
         </header>
+      );
+    }
+
+    /* ----------------------------------------------------------------
+       Notification side panel (scrim + slide-in drawer)
+    ---------------------------------------------------------------- */
+    function NotificationPanel({open,onClose}){
+      const unread = NOTIFICATIONS.filter(n=>n.unread).length;
+      return (
+        <div aria-hidden={!open} className={"fixed inset-0 z-50 "+(open?"":"pointer-events-none")}>
+          {/* scrim */}
+          <div onClick={onClose}
+            className={"absolute inset-0 bg-black/40 transition-opacity duration-200 "+(open?"opacity-100":"opacity-0")}/>
+          {/* drawer */}
+          <aside role="dialog" aria-modal="true" aria-label="Notifications"
+            className={"absolute top-0 right-0 h-full w-full max-w-[400px] bg-surface shadow-xl flex flex-col text-fg "+
+              "transition-transform duration-300 ease-out "+(open?"translate-x-0":"translate-x-full")}>
+            {/* header */}
+            <div className="flex items-center gap-03 px-05 h-[60px] border-b shrink-0"
+              style={{borderColor:"var(--color-border-default)"}}>
+              <span className="text-fg"><I.bell size={20}/></span>
+              <h2 className="font-title text-h3 font-semibold text-fg">Notifications</h2>
+              {unread>0 && (
+                <span className="text-h5 font-semibold px-02 h-06 min-w-[24px] grid place-items-center rounded-full"
+                  style={{background:"var(--color-accent-rose-subtlest)",color:"var(--color-accent-rose-text)"}}>{unread}</span>
+              )}
+              <button aria-label="Close notifications" onClick={onClose}
+                className="ml-auto h-08 w-08 grid place-items-center rounded-full text-fg-subtle hover:bg-black/5 hover:text-fg">
+                <I.x size={18}/>
+              </button>
+            </div>
+            {/* list */}
+            <div className="flex-1 overflow-y-auto">
+              {NOTIFICATIONS.map(n=>{
+                const a=ACCENT[n.accent]||ACCENT.blue; const Ico=I[n.icon];
+                return (
+                  <div key={n.id} className="flex items-start gap-04 px-05 py-04 border-b hover:bg-black/[0.02] transition-colors"
+                    style={{borderColor:"var(--color-border-subtle)"}}>
+                    <span className="h-09 w-09 shrink-0 grid place-items-center rounded-full"
+                      style={{background:a.bg,color:a.fg}}>{Ico && <Ico size={18}/>}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start gap-02">
+                        <p className="text-b2 font-semibold text-fg flex-1">{n.title}</p>
+                        {n.unread && <span className="mt-[6px] h-[8px] w-[8px] shrink-0 rounded-full" style={{background:"var(--color-accent-rose-text)"}}/>}
+                      </div>
+                      <p className="text-h5 text-fg-subtle mt-01 leading-snug">{n.body}</p>
+                      <p className="text-h5 text-fg-subtlest mt-02">{n.time}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {/* footer */}
+            <div className="px-05 py-04 border-t shrink-0" style={{borderColor:"var(--color-border-default)"}}>
+              <button className="w-full h-09 rounded-lg text-b2 font-semibold text-fg-inverse bg-brand hover:opacity-90 transition-opacity">
+                Mark all as read
+              </button>
+            </div>
+          </aside>
+        </div>
       );
     }
 
