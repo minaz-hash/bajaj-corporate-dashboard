@@ -126,7 +126,7 @@
        compiled explicitly by the boot script below (classic JSX runtime) so it
        never depends on Babel's flaky DOMContentLoaded auto-run. -->
   <script type="text/jsx-app" id="app-code">
-    const { useState } = React;
+    const { useState, useMemo } = React;
 
     /* ----------------------------------------------------------------
        Icons — small inline set (Streamline-style, currentColor)
@@ -161,11 +161,12 @@
     /* ----------------------------------------------------------------
        Mock data
     ---------------------------------------------------------------- */
-    const KPIS = [
-      { key:"active",   label:"Active Policies",    value:"413",   trend:"+3.2%", up:true,  hint:"vs last quarter", icon:"shield",   accent:"blue" },
-      { key:"renewals", label:"Renewals Due",       value:"32",    trend:"30 days", up:null, hint:"action needed",   icon:"refresh",  accent:"amber" },
-      { key:"expiring", label:"Policies Expiring",  value:"12",    trend:"this month", up:null, hint:"review soon",   icon:"calendar", accent:"rose" },
-      { key:"wellness", label:"Wellness Score",     value:"4.2", suffix:"/5", trend:"+0.3", up:true, hint:"employee avg", icon:"heart", accent:"emerald" },
+    // Date-range presets — the date filter drives the whole dashboard.
+    const RANGES = [
+      { key:"7d",  label:"Last 7 days",  days:7 },
+      { key:"30d", label:"Last 30 days", days:30 },
+      { key:"qtd", label:"This quarter", days:91 },
+      { key:"ytd", label:"Year to date", days:168 },
     ];
 
     const LOBS = [
@@ -175,12 +176,39 @@
       { key:"health",   label:"Group Health", icon:"heart" },
     ];
 
-    const PORTFOLIO = {
+    // Baseline figures are calibrated to a 30-day window. buildData() rescales the
+    // period metrics (renewals / expiring / pending / claims) to the selected range,
+    // while snapshot metrics (active count, wellness, settlement ratio) stay constant.
+    const PORTFOLIO_BASE = {
       property:{ settlement:94, active:54, pending:20, renewals:27, expiring:32 },
       marine:{ settlement:91, active:18, pending:6, renewals:9, expiring:4 },
       liability:{ settlement:97, active:23, pending:3, renewals:7, expiring:2 },
       health:{ settlement:96, active:12, pending:11, renewals:8, expiring:5 },
     };
+
+    const r0 = n => Math.max(0, Math.round(n));
+
+    function buildData(days){
+      const f = days / 30; // 30-day baseline factor
+      const kpis = [
+        { key:"active",   label:"Active Policies",   value:"413",            trend:"+3.2%", up:true,  hint:"as of today",   icon:"shield",   accent:"blue" },
+        { key:"renewals", label:"Renewals Due",      value:String(r0(32*f)), trend:"in range", up:null, hint:"action needed", icon:"refresh",  accent:"amber" },
+        { key:"expiring", label:"Policies Expiring", value:String(r0(12*f)), trend:"in range", up:null, hint:"review soon",  icon:"calendar", accent:"rose" },
+        { key:"wellness", label:"Wellness Score",    value:"4.2", suffix:"/5", trend:"+0.3", up:true, hint:"employee avg",  icon:"heart",    accent:"emerald" },
+      ];
+      const portfolio = {};
+      for (const k in PORTFOLIO_BASE){
+        const b = PORTFOLIO_BASE[k];
+        portfolio[k] = {
+          settlement: b.settlement,                 // snapshot — constant
+          active:     b.active,                      // snapshot — constant
+          pending:    r0(b.pending * f),             // claims can exceed policy count
+          renewals:   Math.min(b.active, r0(b.renewals * f)),
+          expiring:   Math.min(b.active, r0(b.expiring * f)),
+        };
+      }
+      return { kpis, portfolio };
+    }
 
     const AI_PROMPTS = [
       "Which employees have pending claims?",
@@ -207,13 +235,9 @@
       return (
         <header className="sticky top-0 z-30 bg-brand text-fg-inverse shadow-sm">
           <div className="mx-auto max-w-[1280px] px-08 h-[60px] flex items-center gap-07">
-            {/* co-brand lockup */}
-            <div className="flex items-center gap-03 pr-05 mr-01 border-r border-white/20">
-              <div className="h-[44px] w-[44px] shrink-0 rounded-lg bg-white/15 grid place-items-center font-title font-bold text-[17.6px] leading-none">L&amp;T</div>
-              <div className="leading-tight">
-                <div className="text-h5 text-white/70">Powered by</div>
-                <div className="font-title font-semibold text-h4 -mt-[2px]">Bajaj Allianz</div>
-              </div>
+            {/* brand lockup — white Bajaj General logo (transparent) directly on the blue bar */}
+            <div className="flex items-center pr-05 mr-01 border-r border-white/20">
+              <img src="assets/bajaj-general-logo-white.png" alt="Bajaj General" className="h-09 w-auto block shrink-0" />
             </div>
 
             <nav className="hidden lg:flex items-center gap-01">
@@ -226,7 +250,17 @@
               ))}
             </nav>
 
-            <div className="ml-auto flex items-center gap-04">
+            {/* search — lives in the header now */}
+            <label className="relative ml-auto hidden md:block w-[220px] lg:w-[280px]">
+              <span className="absolute left-03 top-1/2 -translate-y-1/2 text-white/70"><I.search size={16}/></span>
+              <input
+                placeholder="Search policies, claims, ID…"
+                className="w-full h-09 pl-09 pr-03 rounded-lg bg-white/15 text-white placeholder:text-white/60 text-b2
+                           border border-white/20 focus:outline-none focus:bg-white/20 focus:border-white/40
+                           focus:ring-2 focus:ring-white/30 transition-colors"/>
+            </label>
+
+            <div className="flex items-center gap-04">
               <button aria-label="Notifications" className="relative h-09 w-09 grid place-items-center rounded-full hover:bg-white/10 focus:outline-none focus-visible:ring-2 ring-white/60">
                 <I.bell size={20}/>
                 <span className="absolute top-[8px] right-[8px] h-[8px] w-[8px] rounded-full bg-[#f59e0b] ring-2 ring-brand"></span>
@@ -246,22 +280,115 @@
     }
 
     /* ----------------------------------------------------------------
-       Page header + search  (single, calm search — declutter)
+       Date-range filter — drives the whole dashboard
     ---------------------------------------------------------------- */
-    function PageHeader(){
+    function DateFilter({ value, onChange }){
+      const [open,setOpen]=useState(false);
+      const [from,setFrom]=useState(value.custom ? value.custom.from : "");
+      const [to,setTo]=useState(value.custom ? value.custom.to : "");
+      const fmt = s => new Date(s).toLocaleDateString("en-GB",{day:"2-digit",month:"short"});
+
+      function pick(r){ onChange({ key:r.key, days:r.days, label:r.label, custom:null }); setOpen(false); }
+      function applyCustom(){
+        if(!from || !to) return;
+        const days = Math.max(1, Math.round((new Date(to)-new Date(from))/86400000)+1);
+        onChange({ key:"custom", days, label:`${fmt(from)} – ${fmt(to)}`, custom:{from,to} });
+        setOpen(false);
+      }
       return (
-        <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-05">
+        <div className="relative">
+          {open && <div className="fixed inset-0 z-10" onClick={()=>setOpen(false)}/>}
+          <button onClick={()=>setOpen(o=>!o)}
+            className="inline-flex items-center gap-02 h-09 px-04 rounded-lg bg-surface border border-line text-b2 font-medium text-fg shadow-xs hover:bg-surface-hover focus:outline-none focus-visible:shadow-focus">
+            <I.calendar size={16} className="text-fg-subtle"/>
+            <span className="whitespace-nowrap">{value.label}</span>
+            <I.chevron size={15} className="text-fg-subtlest" style={{transform:open?"rotate(90deg)":"none"}}/>
+          </button>
+          {open && (
+            <div className="absolute right-0 mt-02 z-20 w-[288px] bg-surface rounded-xl border border-line shadow-lg p-03">
+              <div className="flex flex-col gap-00">
+                {RANGES.map(r=>{
+                  const on=value.key===r.key;
+                  return (
+                    <button key={r.key} onClick={()=>pick(r)}
+                      className={"flex items-center justify-between rounded-lg px-03 py-03 text-b2 text-left transition-colors "+
+                        (on?"bg-brand-subtler text-fg-brand font-semibold":"text-fg-subtle hover:bg-surface-subtle hover:text-fg")}>
+                      {r.label}
+                      {on && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="border-t border-line mt-02 pt-03">
+                <div className="text-h5 font-semibold text-fg-subtlest uppercase tracking-wide mb-02">Custom range</div>
+                <div className="flex items-center gap-02">
+                  <input type="date" value={from} onChange={e=>setFrom(e.target.value)}
+                    className="flex-1 h-08 px-02 rounded-md border border-line text-b3 text-fg focus:outline-none focus:border-line-brand"/>
+                  <span className="text-fg-subtlest text-b3">–</span>
+                  <input type="date" value={to} onChange={e=>setTo(e.target.value)}
+                    className="flex-1 h-08 px-02 rounded-md border border-line text-b3 text-fg focus:outline-none focus:border-line-brand"/>
+                </div>
+                <button onClick={applyCustom} disabled={!from||!to}
+                  className="mt-03 w-full h-08 rounded-md bg-brand text-fg-inverse text-b2 font-semibold hover:bg-brand-hover disabled:opacity-40 disabled:cursor-not-allowed">
+                  Apply range
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    /* ----------------------------------------------------------------
+       Quick Actions — dropdown menu
+    ---------------------------------------------------------------- */
+    function QuickActionsMenu(){
+      const [open,setOpen]=useState(false);
+      const actions=[
+        {label:"Download Summary",    icon:"doc",      accent:"blue"},
+        {label:"Download MIS Report", icon:"download", accent:"rose"},
+      ];
+      return (
+        <div className="relative">
+          {open && <div className="fixed inset-0 z-10" onClick={()=>setOpen(false)}/>}
+          <button onClick={()=>setOpen(o=>!o)}
+            className="inline-flex items-center gap-02 h-09 px-04 rounded-lg bg-brand text-fg-inverse text-b2 font-semibold shadow-xs hover:bg-brand-hover focus:outline-none focus-visible:shadow-focus">
+            <I.rocket size={16}/>
+            <span className="whitespace-nowrap">Quick Actions</span>
+            <I.chevron size={15} style={{transform:open?"rotate(90deg)":"none"}}/>
+          </button>
+          {open && (
+            <div className="absolute right-0 mt-02 z-20 w-[248px] bg-surface rounded-xl border border-line shadow-lg p-02">
+              {actions.map(a=>{
+                const ac=ACCENT[a.accent], Glyph=I[a.icon];
+                return (
+                  <button key={a.label} onClick={()=>setOpen(false)}
+                    className="w-full flex items-center gap-03 px-03 py-03 rounded-lg hover:bg-surface-subtle text-left transition-colors">
+                    <span className="h-08 w-08 rounded-md grid place-items-center shrink-0" style={{background:ac.bg,color:ac.fg}}><Glyph size={18}/></span>
+                    <span className="text-b2 font-medium text-fg">{a.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    /* ----------------------------------------------------------------
+       Toolbar — greeting + (date filter · quick actions) top-right
+    ---------------------------------------------------------------- */
+    function Toolbar({ range, setRange }){
+      return (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-04">
           <div>
             <h1 className="font-title text-t3 font-semibold text-fg">Hello, Manish 👋</h1>
-            <p className="text-b1 text-fg-subtle mt-01">Here's your insurance overview for L&amp;T Corporate.</p>
+            <p className="text-b2 text-fg-subtle mt-01">Overview for L&amp;T Corporate · <span className="font-medium text-fg-brand">{range.label}</span></p>
           </div>
-          <label className="relative w-full lg:w-[380px]">
-            <span className="absolute left-04 top-1/2 -translate-y-1/2 text-fg-subtlest"><I.search size={18}/></span>
-            <input
-              placeholder="Search policies, claims or ID…"
-              className="w-full h-10 pl-10 pr-04 rounded-lg bg-surface border border-line text-b2 text-fg placeholder:text-fg-subtlest
-                         shadow-xs focus:outline-none focus:border-line-brand focus:shadow-focus transition-shadow"/>
-          </label>
+          <div className="flex items-center gap-03 shrink-0">
+            <DateFilter value={range} onChange={setRange}/>
+            <QuickActionsMenu/>
+          </div>
         </div>
       );
     }
@@ -406,9 +533,9 @@
       );
     }
 
-    function PortfolioCard(){
+    function PortfolioCard({ portfolio }){
       const [tab,setTab]=useState("property");
-      const d=PORTFOLIO[tab];
+      const d=portfolio[tab];
       return (
         <section className="bg-surface rounded-2xl border border-line shadow-sm overflow-hidden">
           {/* header */}
@@ -480,34 +607,6 @@
     }
 
     /* ----------------------------------------------------------------
-       Quick actions
-    ---------------------------------------------------------------- */
-    function QuickActions(){
-      const actions=[
-        {label:"Download Summary", icon:"doc", accent:"blue"},
-        {label:"Download MIS Report", icon:"download", accent:"rose"},
-      ];
-      return (
-        <section className="bg-surface rounded-2xl border border-line shadow-sm p-06">
-          <h3 className="font-title text-h2 font-semibold text-fg mb-04">Quick Actions</h3>
-          <div className="grid grid-cols-2 gap-04">
-            {actions.map(a=>{
-              const ac=ACCENT[a.accent], Glyph=I[a.icon];
-              return (
-                <button key={a.label}
-                  className="rounded-xl border bg-surface hover:shadow-md transition-shadow p-04 flex flex-col items-center gap-03 text-center focus:outline-none focus-visible:shadow-focus"
-                  style={{borderColor:ac.bd}}>
-                  <span className="h-10 w-10 rounded-lg grid place-items-center" style={{background:ac.bg,color:ac.fg}}><Glyph size={22}/></span>
-                  <span className="text-b2 font-semibold text-fg">{a.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      );
-    }
-
-    /* ----------------------------------------------------------------
        Bajaj AI assistant
     ---------------------------------------------------------------- */
     function Assistant(){
@@ -552,15 +651,15 @@
     /* ----------------------------------------------------------------
        Slim alert (replaces floating callouts — declutter)
     ---------------------------------------------------------------- */
-    function ExpiryBanner(){
+    function ExpiryBanner({ count }){
       const [open,setOpen]=useState(true);
-      if(!open) return null;
+      if(!open || !count || count<1) return null;
       return (
         <div className="flex items-center gap-03 rounded-xl border px-05 py-03"
           style={{background:"var(--color-background-warning-default)",borderColor:"var(--color-accent-amber-border)"}}>
           <span style={{color:"var(--color-text-warning)"}}><I.info size={18}/></span>
           <p className="text-b2 text-fg flex-1">
-            <span className="font-semibold">12 policies</span> are expiring within 30 days.
+            <span className="font-semibold">{count} policies</span> are expiring in the selected period.
           </p>
           <button className="text-b2 font-semibold" style={{color:"var(--color-text-warning)"}}>Review now</button>
           <button aria-label="Dismiss" onClick={()=>setOpen(false)} className="text-fg-subtlest hover:text-fg"><I.x size={16}/></button>
@@ -572,23 +671,26 @@
        App shell
     ---------------------------------------------------------------- */
     function App(){
+      const [range,setRange]=useState({ key:"30d", days:30, label:"Last 30 days", custom:null });
+      const data = useMemo(()=>buildData(range.days), [range.days]);
+      const expiring = data.kpis.find(k=>k.key==="expiring");
+
       return (
         <div className="min-h-full page-bg">
           <TopNav/>
           <main className="mx-auto max-w-[1280px] px-08 py-08 flex flex-col gap-07">
-            <PageHeader/>
-            <ExpiryBanner/>
+            <Toolbar range={range} setRange={setRange}/>
+            <ExpiryBanner count={Number(expiring.value)}/>
 
             {/* KPI row */}
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-05">
-              {KPIS.map(k=><KpiCard key={k.key} item={k}/>)}
+              {data.kpis.map(k=><KpiCard key={k.key} item={k}/>)}
             </div>
 
             {/* primary / secondary split */}
             <div className="grid grid-cols-1 xl:grid-cols-[1fr_380px] gap-07 items-start">
-              <PortfolioCard/>
-              <div className="flex flex-col gap-07">
-                <QuickActions/>
+              <PortfolioCard portfolio={data.portfolio}/>
+              <div className="xl:sticky xl:top-[76px]">
                 <Assistant/>
               </div>
             </div>
